@@ -4,6 +4,7 @@ InstructionSet RV32Zpn extends RV32I {
     architectural_state {
         unsigned<32> VXSAT_ADDR__ = 0x009;
         unsigned<32>& VXSAT_CSR__ = CSR[VXSAT_ADDR__];
+        unsigned int dummy = 64;
     }
     instructions {
         // This instruction adds the 8-bit integer elements in Rs1 with the 8-bit integer elements in Rs2,
@@ -120,7 +121,7 @@ InstructionSet RV32Zpn extends RV32I {
                     // } else if (res34 < 0 && (unsigned<64>)(-res34) > (1 << 32)) {
                     } else if (res34 < -(1 << 32)) {
                         res34 = -(1 << 32);
-                        VXSAT_CSR = VXSAT_CSR__ | 1'b1;  // set OV bit
+                        VXSAT_CSR__ = VXSAT_CSR__ | 1'b1;  // set OV bit
                     }
                     X[rd] = res34[31:0];
                 }
@@ -708,7 +709,7 @@ InstructionSet Zpsfoperand extends RISCVBase {  // extends Zpbo?
         // t64 = c64 + rs1 s* rs2;
         // r[dU].r[dL] = t64;
         SMAR64 {
-            encoding: 7'b1000010 :: rs2[4:0] :: rs1[4:0] :: 7'b001 :: rd[4:0] :: 7'b1110111;
+            encoding: 7'b1000010 :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b1110111;
             assembly:"{name(rs2)}, {name(rs1)}, {name(rd)}";
             behavior: {
                 signed<64> rs1_val = X[rs1];
