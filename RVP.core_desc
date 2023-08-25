@@ -215,9 +215,13 @@ InstructionSet RV32Zpn extends RV32I {
         // TODO
         // Mresult = Rs1 * Rs2;
         // Rd = Rd + Mresult.W[0];  // overflow ignored
+        //This instruction multiplies the lower 32-bit content of Rs1 with that of Rs2. 
+        //It adds the lower 32-bit multiplication result to the lower 32-bit content of 
+        //Rd and writes the final result (RV32) or sign-extended result (RV64) back to Rd.
+        // The contents of Rs1 and Rs2 can be either signed or unsigned integers.
         MADDR32 {
             encoding: 7'b1100010 :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b1110111;
-            assembly:"{name(rs2)}, {name(rs1)}, {name(rd)}";
+            assembly:"{name(rsd)}, {name(rs1)}, {name(rs2)}";
             behavior: {
                 if(rd != 0) {
                     signed<32> rs1_val = X[rs1];
@@ -311,16 +315,42 @@ InstructionSet RV32Zpn extends RV32I {
                     unsigned<32> rs1_val = X[rs1];
                     unsigned<32> rs2_val = X[rs2];
                     signed<32> rd_val = X[rd];
-                    signed<32> tmp_val0 = (signed<8>)rs1_val[7:0] * (signed<8>)rs2_val[7:0] + (signed<8>)rd_val[7:0];
-                    signed<32> tmp_val1 = (signed<8>)rs1_val[15:8] * (signed<8>)rs2_val[15:8] + (signed<8>)rd_val[15:8];
-                    signed<32> tmp_val2 = (signed<8>)rs1_val[23:16] * (signed<8>)rs2_val[23:16] + (signed<8>)rd_val[23:16];
-                    signed<32> tmp_val3 = (signed<8>)rs1_val[31:24] * (signed<8>)rs2_val[31:24] + (signed<8>)rd_val[31:24];
+                    signed<32> tmp_val0 = (signed<8>)rs1_val[7:0] * (signed<8>)rs2_val[7:0];
+                    signed<32> tmp_val1 = (signed<8>)rs1_val[15:8] * (signed<8>)rs2_val[15:8];
+                    signed<32> tmp_val2 = (signed<8>)rs1_val[23:16] * (signed<8>)rs2_val[23:16];
+                    signed<32> tmp_val3 = (signed<8>)rs1_val[31:24] * (signed<8>)rs2_val[31:24];
                     rd_val = rd_val + tmp_val3 + tmp_val2 + tmp_val1 + tmp_val0;
                     X[rd] = rd_val;
                 }
             }
         }
-        // SMAQA.SU
+
+
+        //This instruction multiplies the four signed 8-bit elements of 32-bit chunks of Rs1 with the four unsigned 
+        //8-bit elements of 32-bit chunks of Rs2 and then adds the four results together with the signed content of 
+        //the corresponding 32-bit chunks of Rd. The final results are written back to the corresponding 32-bit chunks in Rd.
+        //res[x] = Rd.W[x] +
+        //      SE32(Rs1.W[x].B[3] su* Rs2.W[x].B[3]) + SE32(Rs1.W[x].B[2] su* Rs2.W[x].B[2]) +
+        //      SE32(Rs1.W[x].B[1] su* Rs2.W[x].B[1]) + SE32(Rs1.W[x].B[0] su* Rs2.W[x].B[0]);   // overflow discarded
+        //Rd.W[x] = res[x];
+        SMAQA_SU {
+            encoding: 7'b1100101 :: rs2[4:0] :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b1110111;
+            assembly:"{name(rs2)}, {name(rs1)}, {name(rd)}";
+            behavior: {
+                if(rd != 0) {
+                    unsigned<32> rs1_val = X[rs1];
+                    unsigned<32> rs2_val = X[rs2];
+                    signed<32> rd_val = X[rd];
+                    signed<32> tmp_val0 = (signed<8>)rs1_val[7:0] * (unsigned<8>)rs2_val[7:0];
+                    signed<32> tmp_val1 = (signed<8>)rs1_val[15:8] * (unsigned<8>)rs2_val[15:8];
+                    signed<32> tmp_val2 = (signed<8>)rs1_val[23:16] * (unsigned<8>)rs2_val[23:16];
+                    signed<32> tmp_val3 = (signed<8>)rs1_val[31:24] * (unsigned<8>)rs2_val[31:24];
+                    rd_val = rd_val + tmp_val3 + tmp_val2 + tmp_val1 + tmp_val0;
+                    X[rd] = rd_val;
+                }
+            }
+        }
+
         // This instruction compares the 8-bit signed integer elements in Rs1 with the 8-bit signed integer elements in Rs2
         // and selects the numbers that is greater than the other one. The selected results are written to Rd.
         // Rd.B[x] = (Rs1.B[x] > Rs2.B[x]) ? Rs1.B[x] : Rs2.B[x];
@@ -708,22 +738,25 @@ InstructionSet Zpsfoperand extends RISCVBase {  // extends Zpbo?
         // c64 = r[dU].r[dL];
         // t64 = c64 + rs1 s* rs2;
         // r[dU].r[dL] = t64;
+        //This instruction multiplies the 32-bit signed data of Rs1 with that of Rs2. It adds the 64-bit multiplication result to the 64-bit signed 
+        //data of an even/odd pair of registers specified by Rd(4,1). 
+        //The addition result is written back to the even/odd pair of registers specified by Rd(4,1).
+        //For this instruction, any potential overflow bit beyond 64-bit is discarded and ignored.
+        //Rx(4,1), i.e., d, determines the even/odd pair group of two registers. Specifically, the register pair includes register 2d and 2d+1
         SMAR64 {
             encoding: 7'b1000010 :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b1110111;
             assembly:"{name(rs2)}, {name(rs1)}, {name(rd)}";
             behavior: {
-                signed<64> rs1_val = X[rs1];
-                signed<64> rs2_val = X[rs2];
-                signed<64> rd_hi = X[rd[4:1]*2+1];  // ???
-                signed<32> rd_lo = X[rd[4:1]*2];
-                signed<64> temp = rd_hi :: rd_lo;
-                signed<64> temp2 = temp + rs1_val * rs2_val;
-                // discard overflow
-                X[rd[4:1]*2+1] = temp2[63:32];
-                X[rd[4:1]*2] = temp2[31:0];
-            }
-        }
+                signed<32> rs1_val = X[rs1][31:0];
+                signed<32> rs2_val = X[rs2][31:0];
+                signed<64> rd_val = X[rd[4:1]*2 + 1][31:0] :: X[rd[4:1]*2][31:0];
+                signed<64> product = ((signed<64>)rs1_val) * ((signed<64>)rs2_val);
+                signed<64> result = rd_val + product;
+                X[rd[4:1]*2+1] = result[63:32];
+                X[rd[4:1]*2] = result[31:0];
 
+          }
+        }
         // SMSR64
         // UMAR64
         // UMSR64
@@ -742,6 +775,11 @@ InstructionSet Zpsfoperand extends RISCVBase {  // extends Zpbo?
         // SMSLDA
         // SMSLXDA
         // TODO
+
+        //This instruction multiplies the 32-bit content of Rs1 with that of Rs2 and writes the 64-bit
+        //multiplication result to an even/odd pair of registers containing Rd. Rd(4,1) index d determines
+        //the even/odd pair group of the two registers. Specifically, the register pair includes register 2d and 2d+1.
+        //The lower 32-bit contents of Rs1 and Rs2 are treated as unsigned integers.
         MULR64 {
             encoding: 7'b1111000 :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b1110111;
             assembly:"{name(rs2)}, {name(rs1)}, {name(rd)}";
@@ -751,6 +789,7 @@ InstructionSet Zpsfoperand extends RISCVBase {  // extends Zpbo?
                 unsigned<64> product = rs1_val * rs2_val;
                 X[rd[4:1]*2+1] = product[63:32];
                 X[rd[4:1]*2] = product[31:0];
+                
             }
         }
         // MULSR64
@@ -784,19 +823,18 @@ InstructionSet RV32Zpsfoperand extends Zpsfoperand {
             }
         }
         // TODO
+        //This instruction subtracts the 64-bit integer of an even/odd pair of registers specified by Rs2(4,1) from 
+        //the 64-bit integer of an even/odd pair of registers specified by Rs1(4,1), and then writes the 64-bit result to an even/odd pair of registers specified by Rd(4,1).
+        //Rx(4,1), i.e., d, determines the even/odd pair group of two registers. Specifically, the register pair includes register 2d and 2d+1.
         SUB64 {
             encoding: 7'b1100001 :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b1110111;
             assembly:"{name(rs2)}, {name(rs1)}, {name(rd)}";
             behavior: {
-                signed<64> rs1_val_hi = X[rs1[4:1]*2+1];  // ???
-                signed<32> rs1_val_lo = X[rs1[4:1]*2];
-                signed<64> rs1_val = rs1_val_hi :: rs1_val_lo;
-                signed<64> rs2_val_hi = X[rs2[4:1]*2+1];  // ???
-                signed<32> rs2_val_lo = X[rs2[4:1]*2];
-                signed<64> rs2_val = rs2_val_hi :: rs2_val_lo;
-                signed<64> sum = rs1_val - rs2_val;
-                X[rd[4:1]*2+1] = sum[63:32];
-                X[rd[4:1]*2] = sum[31:0];
+                signed<64> rs1_val = X[rs1[4:1]*2+1][31:0] :: X[rs1[4:1]*2][31:0];
+                signed<64> rs2_val = X[rs2[4:1]*2+1][31:0] :: X[rs2[4:1]*2][31:0];
+                signed<64> result = rs1_val - rs2_val;
+                X[rd[4:1]*2+1] = result[63:32];
+                X[rd[4:1]*2] = result[31:0];
             }
         }
     }
