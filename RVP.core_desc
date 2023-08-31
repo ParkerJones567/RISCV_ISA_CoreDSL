@@ -17,11 +17,11 @@ InstructionSet RV32Zpn extends RV32I {
                 if(rd != 0) {
                     unsigned<32> rs1_val = X[rs1];
                     unsigned<32> rs2_val = X[rs2];
-                    unsigned<8> rd_val0 = rs1_val[7:0] + rs2_val[7:0];
-                    unsigned<8> rd_val1 = rs1_val[15:8] + rs2_val[15:8];
-                    unsigned<8> rd_val2 = rs1_val[23:16] + rs2_val[23:16];
-                    unsigned<8> rd_val3 = rs1_val[31:24] + rs2_val[31:24];
-                    unsigned<32> rd_val = rd_val3 :: rd_val2 :: rd_val1 :: rd_val0;
+                    signed<8> rd_val0 = (signed<8>)rs1_val[7:0] + (signed<8>)rs2_val[7:0];
+                    signed<8> rd_val1 = (signed<8>)rs1_val[15:8] + (signed<8>)rs2_val[15:8];
+                    signed<8> rd_val2 = (signed<8>)rs1_val[23:16] + (signed<8>)rs2_val[23:16];
+                    signed<8> rd_val3 = (signed<8>)rs1_val[31:24] + (signed<8>)rs2_val[31:24];
+                    unsigned<32> rd_val = rd_val3[7:0] :: rd_val2[7:0] :: rd_val1[7:0] :: rd_val0[7:0];
                     X[rd] = rd_val;
                 }
             }
@@ -80,9 +80,62 @@ InstructionSet RV32Zpn extends RV32I {
         // KHMBB
         // KHMBT
         // KHMTT
-        // KMABB
+        //For the KMABB instruction, it multiplies the bottom 16-bit content of 32-bit elements 
+        //in Rs1 with the bottom 16-bit content of 32-bit elements in Rs2.
+        //The multiplication result is added to the content of 32-bit elements in Rd. If the addition result 
+        //exceeds the Q31 number range (-231 <= Q31 <= 231-1), it is saturated to the range and the OV bit is set 
+        //to 1. The results after saturation are written to Rd. The 16-bit contents of Rs1 and Rs2 are treated as signed integers.
+        KMABB {
+            encoding: 7'b0101101 :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b1110111;
+            assembly:"{name(rs2)}, {name(rs1)}, {name(rd)}";
+            behavior: {
+                if(rd != 0) {
+                    unsigned<32> rs1_val = X[rs1];
+                    unsigned<32> rs2_val = X[rs2];
+                    signed<32> rd_val = X[rd];
+                    signed<16> rs1_val_lo = rs1_val[15:0];
+                    signed<16> rs2_val_lo = rs2_val[15:0];
+                    signed<32> mul32 = rs1_val_lo * rs2_val_lo;
+                    signed<64> res34 = (signed<64>)rd_val + (signed<64>)mul32;
+                    if (res34 >= (signed<64>)(1 << 32)) {  // broken?
+                        res34 = (1 << 32) - 1;
+                        VXSAT_CSR__ = VXSAT_CSR__ | 1'b1;  // set OV bit
+                    } else if (res34 < -(1 << 32)) {
+                       res34 = -(1 << 32);
+                        VXSAT_CSR__ = VXSAT_CSR__ | 1'b1;  // set OV bit
+                    }
+                    X[rd] = res34[31:0];
+                }
+            }
+        }
         // KMABT
-        // KMATT
+        //For the KMATT instruction, it multiplies the top 16-bit content of 32-bit elements in Rs1 with the top 16-bit content of 32-bit elements in Rs2.
+        //The multiplication result is added to the content of 32-bit elements in Rd. If the addition result 
+        //exceeds the Q31 number range (-231 ,<= Q31 <= 231-1), it is saturated to the range and the OV bit is set 
+        //to 1. The results after saturation are written to Rd. The 16-bit contents of Rs1 and Rs2 are treated as signed integers.
+        KMATT {
+           encoding: 7'b0111101 :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b1110111;
+           assembly:"{name(rs2)}, {name(rs1)}, {name(rd)}";
+           behavior: {
+                if(rd != 0) {
+                    unsigned<32> rs1_val = X[rs1];
+                    unsigned<32> rs2_val = X[rs2];
+                    signed<32> rd_val = X[rd];
+                    signed<16> rs1_val_hi = rs1_val[31:16];
+                    signed<16> rs2_val_hi = rs2_val[31:16];
+                    signed<32> mul32 = rs1_val_hi * rs2_val_hi;
+                    signed<64> res34 = (signed<64>)rd_val + (signed<64>)mul32;
+                    if (res34 >= (signed<64>)(1 << 32)) {  // broken?
+                        res34 = (1 << 32) - 1;
+                        VXSAT_CSR__ = VXSAT_CSR__ | 1'b1;  // set OV bit
+                    } else if (res34 < -(1 << 32)) {
+                        res34 = -(1 << 32);
+                        VXSAT_CSR__ = VXSAT_CSR__ | 1'b1;  // set OV bit
+                    }
+                    X[rd] = res34[31:0];
+                }
+            }
+        }
         // TODO
         // mula32[x] = Rs1.W[x].H[1] s* Rs2.W[x].H[1]; // KMADA
         // mulb32[x] = Rs1.W[x].H[0] s* Rs2.W[x].H[0]; //
@@ -232,9 +285,25 @@ InstructionSet RV32Zpn extends RV32I {
                 }
             }
         }
-        // MAXW
+        // MAX
         // MINW
-        // MSUBR32
+        //This instruction multiplies the lower 32-bit content of Rs1 with that of Rs2, 
+        //subtracts the lower 32-bit multiplication result from the lower 32-bit content
+        //of Rd, then writes the final result (RV32) or sign-extended result (RV64)
+        // back to Rd. The contents of Rs1 and Rs2 can be either signed or unsigned integers.
+        MSUBR32 {
+            encoding: 7'b1100011 :: rs2[4:0] :: rs1[4:0] :: 3'b001 :: rd[4:0] :: 7'b1110111;
+            assembly:"{name(rsd)}, {name(rs1)}, {name(rs2)}";
+            behavior: {
+                if(rd != 0) {
+                    signed<32> rs1_val = X[rs1];
+                    signed<32> rs2_val = X[rs2];
+                    signed<64> temp = rs1_val * rs2_val;
+                    signed<32> rd_val = X[rd] - temp[31:0];
+                    X[rd] = rd_val;
+                }
+            }
+        }
         // PBSAD
         // PBSADA
         // PKBB16
@@ -361,10 +430,10 @@ InstructionSet RV32Zpn extends RV32I {
                 if(rd != 0) {
                     unsigned<32> rs1_val = X[rs1];
                     unsigned<32> rs2_val = X[rs2];
-                    unsigned<8> rd_val0 = rs1_val[7:0] > rs2_val[7:0] ? rs1_val[7:0] : rs2_val[7:0];
-                    unsigned<8> rd_val1 = rs1_val[15:8] > rs2_val[15:8] ? rs1_val[15:8] : rs2_val[15:8];
-                    unsigned<8> rd_val2 = rs1_val[23:16] > rs2_val[23:16] ? rs1_val[23:16] : rs2_val[23:16];
-                    unsigned<8> rd_val3 = rs1_val[31:24] > rs2_val[31:24] ? rs1_val[31:24] : rs2_val[31:24];
+                    unsigned<8> rd_val0 = ((signed<8>)rs1_val[7:0]) > ((signed<8>)rs2_val[7:0]) ? rs1_val[7:0] : rs2_val[7:0];
+                    unsigned<8> rd_val1 = ((signed<8>)rs1_val[15:8]) > ((signed<8>)rs2_val[15:8]) ? rs1_val[15:8] : rs2_val[15:8];
+                    unsigned<8> rd_val2 = ((signed<8>)rs1_val[23:16]) > ((signed<8>)rs2_val[23:16]) ? rs1_val[23:16] : rs2_val[23:16];
+                    unsigned<8> rd_val3 = ((signed<8>)rs1_val[31:24]) > ((signed<8>)rs2_val[31:24]) ? rs1_val[31:24] : rs2_val[31:24];
                     unsigned<32> rd_val = rd_val3 :: rd_val2 :: rd_val1 :: rd_val0;
                     X[rd] = rd_val;
                 }
@@ -403,10 +472,10 @@ InstructionSet RV32Zpn extends RV32I {
                 if(rd != 0) {
                     unsigned<32> rs1_val = X[rs1];
                     unsigned<32> rs2_val = X[rs2];
-                    unsigned<8> rd_val0 = rs1_val[7:0] < rs2_val[7:0] ? rs1_val[7:0] : rs2_val[7:0];
-                    unsigned<8> rd_val1 = rs1_val[15:8] < rs2_val[15:8] ? rs1_val[15:8] : rs2_val[15:8];
-                    unsigned<8> rd_val2 = rs1_val[23:16] < rs2_val[23:16] ? rs1_val[23:16] : rs2_val[23:16];
-                    unsigned<8> rd_val3 = rs1_val[31:24] < rs2_val[31:24] ? rs1_val[31:24] : rs2_val[31:24];
+                    unsigned<8> rd_val0 = ((signed<8>)rs1_val[7:0]) < ((signed<8>)rs2_val[7:0]) ? rs1_val[7:0] : rs2_val[7:0];
+                    unsigned<8> rd_val1 = ((signed<8>)rs1_val[15:8]) < ((signed<8>)rs2_val[15:8]) ? rs1_val[15:8] : rs2_val[15:8];
+                    unsigned<8> rd_val2 = ((signed<8>)rs1_val[23:16]) < ((signed<8>)rs2_val[23:16]) ? rs1_val[23:16] : rs2_val[23:16];
+                    unsigned<8> rd_val3 = ((signed<8>)rs1_val[31:24]) < ((signed<8>)rs2_val[31:24]) ? rs1_val[31:24] : rs2_val[31:24];
                     unsigned<32> rd_val = rd_val3 :: rd_val2 :: rd_val1 :: rd_val0;
                     X[rd] = rd_val;
                 }
@@ -458,34 +527,34 @@ InstructionSet RV32Zpn extends RV32I {
             }
         }
         // SUB16
-        // TODO (SUNPKD8xy)
-        SUNPKD8 {
-            encoding: 7'b1010110 :: code[4:0] :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b1110111;
+        SUNPKD810 {
+            encoding: 7'b1010110 :: 5'b01000 :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b1110111;
             assembly:"{name(rs1)}, {name(rd)}";
             behavior: {
                 if(rd != 0) {
                     unsigned<32> rs1_val = X[rs1];
-                    // TODO: move to helper function
-                    if(code == 5'b01000) {  // SUNPKD810
-                        signed<8> rs1_val_hi = rs1_val[15:8];
-                        signed<8> rs1_val_lo = rs1_val[7:0];
-                    } else if (code == 5'b01001) {  // SUNPKD820
-                        signed<8> rs1_val_hi = rs1_val[23:16];
-                        signed<8> rs1_val_lo = rs1_val[7:0];
-                    } else if (code == 5'b01010) {  // SUNPKD830
-                        signed<8> rs1_val_hi = rs1_val[31:24];
-                        signed<8> rs1_val_lo = rs1_val[7:0];
-                    } else if (code == 5'b01011) {  // SUNPKD831
-                        signed<8> rs1_val_hi = rs1_val[31:24];
-                        signed<8> rs1_val_lo = rs1_val[15:8];
-                    } else if (code == 5'b10011) {  // SUNPKD832
-                        signed<8> rs1_val_hi = rs1_val[31:24];
-                        signed<8> rs1_val_lo = rs1_val[23:16];
-                    } else {
-                        raise(0, 2);  // Invalid instruction?
-                    }
+                    signed<8> rs1_val_hi = rs1_val[15:8];
+                    signed<8> rs1_val_lo = rs1_val[7:0];
                     X[rd] = (signed<16>)rs1_val_hi :: (unsigned<16>)(signed<16>)rs1_val_lo;
                 }
+
+            }
+        }
+        // SUNPKD820
+        // SUNPKD830
+        // SUNPKD831
+        // SUNPKD832
+        SUNPKD832 {
+            encoding: 7'b1010110 :: 5'b10011 :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b1110111;
+            assembly:"{name(rs1)}, {name(rd)}";
+            behavior: {
+                if(rd != 0) {
+                    unsigned<32> rs1_val = X[rs1];
+                    signed<8> rs1_val_hi = rs1_val[31:24];
+                    signed<8> rs1_val_lo = rs1_val[23:16];
+                    X[rd] = (signed<16>)rs1_val_hi :: (unsigned<16>)(signed<16>)rs1_val_lo;
+                }
+
             }
         }
         // SWAP8
@@ -528,10 +597,36 @@ InstructionSet RV32Zpn extends RV32I {
         // URSUBW
         // WEXT
         // ZUNPKD810
+        ZUNPKD810 {
+            encoding: 7'b1010110 :: 5'b01100 :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b1110111;
+            assembly:"{name(rs1)}, {name(rd)}";
+            behavior: {
+                if(rd != 0) {
+                    unsigned<32> rs1_val = X[rs1];
+                    unsigned<8> rs1_val_hi = rs1_val[15:8];
+                    unsigned<8> rs1_val_lo = rs1_val[7:0];
+                    X[rd] = (unsigned<16>)rs1_val_hi :: (unsigned<16>)rs1_val_lo;
+                }
+
+            }
+        }
         // ZUNPKD820
         // ZUNPKD830
         // ZUNPKD831
         // ZUNPKD832
+        ZUNPKD832 {
+            encoding: 7'b1010110 :: 5'b10111 :: rs1[4:0] :: 3'b000 :: rd[4:0] :: 7'b1110111;
+            assembly:"{name(rs1)}, {name(rd)}";
+            behavior: {
+                if(rd != 0) {
+                    unsigned<32> rs1_val = X[rs1];
+                    unsigned<8> rs1_val_hi = rs1_val[31:24];
+                    unsigned<8> rs1_val_lo = rs1_val[23:16];
+                    X[rd] = (unsigned<16>)rs1_val_hi :: (unsigned<16>)rs1_val_lo;
+                }
+
+            }
+        }
         // TODO
         // Mresult = ZE33(Rs1) u* ZE33(Rs2);
         // R[Rd(4,1).1(0)][31:0] = Mresult[63:32];
@@ -628,22 +723,21 @@ InstructionSet RV32Zpn extends RV32I {
 
 InstructionSet Zbpo extends RISCVBase {  // extends Zpn?
     instructions {
-        // TODO
+        //(PACK) The PACK instruction packs the XLEN/2-bit lower halves of rs1 and rs2 into rd, with rs1 in the lower half and rs2 in the upper half.
         PACK {
             encoding: 7'b0000100 :: rs2[4:0] :: rs1[4:0] :: 3'b100 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rs2)}, {name(rs1)}, {name(rd)}";
             behavior: {
                 if(rd != 0) {
-                    unsigned<XLEN> rs1_val = X[rs1];
-                    unsigned<XLEN> rs2_val = X[rs2];
-                    unsigned<(XLEN/2)> rd_val_lo = rs1_val[(XLEN/2)-1:0];
-                    unsigned<(XLEN/2)> rd_val_hi = rs2_val[(XLEN/2)-1:0];
-                    unsigned<XLEN> rd_val = rd_val_hi :: rd_val_lo;
+                    unsigned<16> rs1_val = X[rs1][15:0];
+                    unsigned<16> rs2_val = X[rs2][15:0];
+                    unsigned<32> rd_val = rs2_val :: rs1_val;
                     X[rd] = rd_val;
                 }
             }
         }
         // TODO
+        //(PACKU) The PACKU instruction packs the XLEN/2-bit upper halves of rs1 and rs2 into rd, with rs1 in the lower half and rs2 in the upper half.
         PACKU {
             encoding: 7'b0100100 :: rs2[4:0] :: rs1[4:0] :: 3'b100 :: rd[4:0] :: 7'b0110011;
             assembly:"{name(rs2)}, {name(rs1)}, {name(rd)}";
